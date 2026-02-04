@@ -1,0 +1,67 @@
+[package]
+name = "janus"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web framework and async runtime
+axum = { version = "0.7", features = ["ws"] }
+tokio = { version = "1", features = ["full", "signal"] }
+tokio-util = { version = "0.7", features = ["codec", "io", "compat"] }
+futures = "0.3"
+axum-server = { version = "0.8", features = ["tls-rustls"] }
+
+# PTY and process management
+portable-pty = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Security and authentication
+tower_governor = "0.4"
+tower-cookies = "0.10"
+subtle = "2.5"
+base64 = "0.22"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
+rand = "0.8"
+hex = "0.4"
+tokio-rustls = "0.26"
+rustls = "0.23"
+rustls-pemfile = "2.0"
+rcgen = "0.13"
+
+# Datetime
+chrono = "0.4"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Middleware and HTTP utilities
+tower = "0.5"
+tower-http = { version = "0.5", features = ["fs", "trace", "limit"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "1"
+
+# Utilities
+dirs = "5"
+nix = { version = "0.29", features = ["user"] }
+async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
+
+[dev-dependencies]
+tokio-test = "0.4"
+axum-test = "14"
+tempfile = "3"
+
+[[bin]]
+name = "janus"
+path = "src/main.rs"
+
+[lib]
+name = "janus"
+path = "src/lib.rs"

@@ -1,0 +1,67 @@
+# Example configuration file for Janus terminal application
+# Copy this file to config.toml and customize the values
+
+# Server bind address (default: "127.0.0.1:8080")
+bind_address = "127.0.0.1:8080"
+
+# Idle timeout in seconds - sessions inactive for this duration will be terminated
+# Must be greater than 0 (default: 3600 = 1 hour)
+idle_timeout_secs = 3600
+
+# Token validity duration in seconds - authentication tokens expire after this time
+# Must be greater than 0 (default: 3600 = 1 hour)
+token_validity_secs = 3600
+
+# Maximum number of concurrent terminal sessions
+# Must be greater than 0 (default: 4)
+max_sessions = 4
+
+# Directory for session logs
+# Supports tilde (~) expansion for home directory
+# (default: "~/.janus/logs")
+log_dir = "~/.janus/logs"
+
+# Enable HTTPS (default: false)
+# Required when using allowed_origins for public exposure
+use_https = false
+
+# TLS certificate path (optional)
+# If not specified and use_https=true, a self-signed certificate will be auto-generated
+# tls_cert_path = "/path/to/cert.pem"
+
+# TLS private key path (optional)
+# Must be provided if tls_cert_path is specified
+# tls_key_path = "/path/to/key.pem"
+
+# Auto-generate self-signed certificate if cert/key not provided (default: true)
+# Only used when use_https=true
+tls_auto_generate = true
+
+# Allowed origins for public exposure (e.g., ngrok)
+# Leave empty for localhost-only access
+# Must be HTTPS for security (enforced by validation)
+# Supports wildcards for dynamic subdomains
+# Examples:
+#   Static ngrok domain: allowed_origins = ["https://myapp.ngrok.io"]
+#   Ngrok free tier (wildcards): allowed_origins = ["https://*.ngrok-free.app"]
+#   Multiple domains: allowed_origins = ["https://*.ngrok-free.app", "https://myapp.example.com"]
+allowed_origins = []
+
+# Rate limiting configuration
+[rate_limit]
+# Maximum number of requests allowed per period (default: 3)
+# Applied globally across all requests
+requests_per_period = 3
+
+# Time period in seconds for rate limiting (default: 60)
+period_secs = 60
+
+# Note: Rate limiting is applied globally rather than per-IP for reliability
+# This protects against abuse while working consistently across all deployment scenarios
+
+# Notification configuration
+# Currently supports iMessage only, with more backends planned
+[notification.imessage]
+# Phone number to receive authentication tokens
+# Must start with + and contain only digits (e.g., +1234567890)
+phone_number = "+1234567890"
