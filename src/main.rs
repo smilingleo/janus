@@ -161,26 +161,19 @@ async fn generate_token(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
 ) -> (StatusCode, Json<TokenGenerateResponse>) {
-    // Extract client IP address
-    let client_ip = match janus::client_info::extract_client_ip(&headers) {
-        Ok(ip) => {
-            tracing::info!(
-                client_ip = %ip,
-                "Token generation request from IP"
-            );
-            ip
-        }
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to extract client IP");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(TokenGenerateResponse {
-                    success: false,
-                    message: "Failed to identify client".to_string(),
-                }),
-            );
-        }
-    };
+    // Extract client IP address (with fallback to "local" for testing)
+    let client_ip = janus::client_info::extract_client_ip_or_local(&headers);
+
+    if janus::client_info::is_local_ip_sentinel(&client_ip) {
+        tracing::info!(
+            "Token generation request from local connection (no proxy headers)"
+        );
+    } else {
+        tracing::info!(
+            client_ip = %client_ip,
+            "Token generation request from IP"
+        );
+    }
 
     // Extract user agent
     let user_agent = headers
@@ -268,28 +261,17 @@ async fn login(
         "Login attempt"
     );
 
-    // Extract client IP address
-    let client_ip = match janus::client_info::extract_client_ip(&headers) {
-        Ok(ip) => {
-            tracing::info!(
-                client_ip = %ip,
-                "Login request from IP"
-            );
-            ip
-        }
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to extract client IP");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(LoginResponse {
-                    success: false,
-                    message: "Failed to identify client".to_string(),
-                    csrf_token: None,
-                    session_duration_secs: None,
-                }),
-            );
-        }
-    };
+    // Extract client IP address (with fallback to "local" for testing)
+    let client_ip = janus::client_info::extract_client_ip_or_local(&headers);
+
+    if janus::client_info::is_local_ip_sentinel(&client_ip) {
+        tracing::info!("Login request from local connection");
+    } else {
+        tracing::info!(
+            client_ip = %client_ip,
+            "Login request from IP"
+        );
+    }
 
     // Extract browser fingerprint
     let fingerprint = janus::client_info::Fingerprint::from_headers(&headers);
@@ -503,21 +485,8 @@ async fn create_session(
     headers: HeaderMap,
     Json(request): Json<CreateSessionRequest>,
 ) -> (StatusCode, Json<CreateSessionResponse>) {
-    // Extract client IP address
-    let client_ip = match janus::client_info::extract_client_ip(&headers) {
-        Ok(ip) => ip,
-        Err(e) => {
-            tracing::error!(error = ?e, "Failed to extract client IP");
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(CreateSessionResponse {
-                    success: false,
-                    message: "Failed to identify client".to_string(),
-                    session_id: None,
-                }),
-            );
-        }
-    };
+    // Extract client IP address (with fallback to "local" for testing)
+    let client_ip = janus::client_info::extract_client_ip_or_local(&headers);
 
     // Extract user agent
     let user_agent = headers
@@ -665,8 +634,7 @@ async fn websocket_handler(
     cookies: Cookies,
 ) -> Result<Response, StatusCode> {
     // Extract client IP and user agent for logging
-    let client_ip = janus::client_info::extract_client_ip(&headers)
-        .unwrap_or_else(|_| "unknown".to_string());
+    let client_ip = janus::client_info::extract_client_ip_or_local(&headers);
     let user_agent = headers
         .get("user-agent")
         .and_then(|v| v.to_str().ok())

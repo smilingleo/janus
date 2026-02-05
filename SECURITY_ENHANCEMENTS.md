@@ -41,21 +41,36 @@ When a client requests an authentication token, their IP address is extracted an
 - Validates IP format to prevent injection attacks
 - Supports both IPv4 and IPv6 addresses
 
+### Local Testing Fallback
+
+When IP address cannot be determined (e.g., local testing without proxy headers):
+- Uses sentinel value `"local"` instead of failing
+- IP validation is **skipped** when both stored and current IPs are `"local"`
+- Browser fingerprint validation remains active
+- Provides graceful degradation for development environments
+
+**Security Notes:**
+- If session was created with real IP, requests with sentinel value are rejected (mode mismatch)
+- If session was created with sentinel value, requests with real IP are rejected (mode mismatch)
+- This prevents attacks where attacker bypasses IP check by removing headers
+
 ### Security Guarantees
 
-- **Token theft protection**: Stolen token cannot be used from different IP
+- **Token theft protection**: Stolen token cannot be used from different IP (or different validation mode)
 - **Session hijacking protection**: Stolen session cookie cannot be used from different IP
 - **Proxy-aware**: Works correctly behind ngrok, nginx, CloudFlare, etc.
+- **Local testing friendly**: Gracefully falls back to fingerprint-only validation
 
 ### Limitations
 
 - **Dynamic IPs**: Users with frequently changing IPs may experience logout
 - **Mobile networks**: Cellular networks may rotate IPs during session
 - **Shared IPs**: Multiple users behind same NAT share IP (not a security issue)
+- **Local mode**: When using sentinel value, only browser fingerprint provides protection
 
 ### Configuration
 
-No configuration required. IP validation is always enabled.
+No configuration required. IP validation is always enabled with automatic fallback.
 
 ## Session Fingerprinting
 

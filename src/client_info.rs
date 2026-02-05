@@ -8,6 +8,14 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use thiserror::Error;
 
+/// Sentinel value used when IP address cannot be determined (e.g., local testing)
+pub const LOCAL_IP_SENTINEL: &str = "local";
+
+/// Check if an IP address is the sentinel value indicating local/unknown IP
+pub fn is_local_ip_sentinel(ip: &str) -> bool {
+    ip == LOCAL_IP_SENTINEL
+}
+
 /// Errors that can occur during client info extraction
 #[derive(Debug, Error)]
 pub enum ClientInfoError {
@@ -137,7 +145,59 @@ pub fn extract_client_ip(headers: &HeaderMap) -> Result<String, ClientInfoError>
     Err(ClientInfoError::NoIpFound)
 }
 
+/// Extract client IP address from HTTP headers with fallback to sentinel value
+///
+/// This is a convenience wrapper around `extract_client_ip()` that returns
+/// a sentinel value ("local") when IP cannot be determined, instead of returning
+/// an error. Useful for local testing scenarios where proxy headers are not available.
+///
+/// # Arguments
+/// * `headers` - HTTP request headers
+///
+/// # Returns
+/// The client's IP address as a string, or "local" if IP cannot be determined
+pub fn extract_client_ip_or_local(headers: &HeaderMap) -> String {
+    extract_client_ip(headers).unwrap_or_else(|_| LOCAL_IP_SENTINEL.to_string())
+}
+
 /// Validate that a request comes from the same IP address
+///
+/// Handles the case where IP cannot be determined (sentinel value) by skipping
+/// validation when both stored and current IPs are the sentinel value.
+///
+/// # Arguments
+/// * `expected_ip` - The expected IP address (may be sentinel value)
+/// * `actual_ip` - The actual IP address from request (may be sentinel value)
+///
+/// # Returns
+/// Ok(()) if IPs match or both are sentinel values, Err otherwise
+pub fn validate_ip_match(expected_ip: &str, actual_ip: &str) -> Result<(), ClientInfoError> {
+    // If both are sentinel values (local), skip IP validation
+    if is_local_ip_sentinel(expected_ip) && is_local_ip_sentinel(actual_ip) {
+        tracing::debug!("Skipping IP validation (both are local/unknown)");
+        return Ok(());
+    }
+
+    // If only one is sentinel, this is suspicious
+    if is_local_ip_sentinel(expected_ip) || is_local_ip_sentinel(actual_ip) {
+        return Err(ClientInfoError::InvalidIpAddress(format!(
+            "IP validation mode mismatch: expected {}, got {}",
+            expected_ip, actual_ip
+        )));
+    }
+
+    // Both are real IPs, validate they match
+    if actual_ip == expected_ip {
+        Ok(())
+    } else {
+        Err(ClientInfoError::InvalidIpAddress(format!(
+            "IP mismatch: expected {}, got {}",
+            expected_ip, actual_ip
+        )))
+    }
+}
+
+/// Validate that a request comes from the same IP address (legacy function)
 ///
 /// # Arguments
 /// * `headers` - HTTP request headers
@@ -147,15 +207,7 @@ pub fn extract_client_ip(headers: &HeaderMap) -> Result<String, ClientInfoError>
 /// Ok(()) if IP matches, Err otherwise
 pub fn validate_client_ip(headers: &HeaderMap, expected_ip: &str) -> Result<(), ClientInfoError> {
     let actual_ip = extract_client_ip(headers)?;
-
-    if actual_ip == expected_ip {
-        Ok(())
-    } else {
-        Err(ClientInfoError::InvalidIpAddress(format!(
-            "IP mismatch: expected {}, got {}",
-            expected_ip, actual_ip
-        )))
-    }
+    validate_ip_match(expected_ip, &actual_ip)
 }
 
 #[cfg(test)]
@@ -353,5 +405,76 @@ mod tests {
 
         let ip = extract_client_ip(&headers).unwrap();
         assert_eq!(ip, "203.0.113.1");
+    }
+
+    #[test]
+    fn test_extract_client_ip_or_local_with_no_headers() {
+        let headers = HeaderMap::new();
+        let ip = extract_client_ip_or_local(&headers);
+        assert_eq!(ip, LOCAL_IP_SENTINEL);
+    }
+
+    #[test]
+    fn test_extract_client_ip_or_local_with_xff() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-forwarded-for", HeaderValue::from_static("203.0.113.1"));
+
+        let ip = extract_client_ip_or_local(&headers);
+        assert_eq!(ip, "203.0.113.1");
+    }
+
+    #[test]
+    fn test_is_local_ip_sentinel() {
+        assert!(is_local_ip_sentinel(LOCAL_IP_SENTINEL));
+        assert!(is_local_ip_sentinel("local"));
+        assert!(!is_local_ip_sentinel("203.0.113.1"));
+        assert!(!is_local_ip_sentinel(""));
+    }
+
+    #[test]
+    fn test_validate_ip_match_both_local() {
+        let result = validate_ip_match(LOCAL_IP_SENTINEL, LOCAL_IP_SENTINEL);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_ip_match_both_real_same() {
+        let result = validate_ip_match("203.0.113.1", "203.0.113.1");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_ip_match_both_real_different() {
+        let result = validate_ip_match("203.0.113.1", "198.51.100.1");
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ClientInfoError::InvalidIpAddress(msg) => {
+                assert!(msg.contains("IP mismatch"));
+            }
+            _ => panic!("Expected InvalidIpAddress error"),
+        }
+    }
+
+    #[test]
+    fn test_validate_ip_match_mixed_sentinel() {
+        // One local, one real - should fail
+        let result1 = validate_ip_match(LOCAL_IP_SENTINEL, "203.0.113.1");
+        assert!(result1.is_err());
+        match result1.unwrap_err() {
+            ClientInfoError::InvalidIpAddress(msg) => {
+                assert!(msg.contains("mode mismatch"));
+            }
+            _ => panic!("Expected InvalidIpAddress error"),
+        }
+
+        // One real, one local - should fail
+        let result2 = validate_ip_match("203.0.113.1", LOCAL_IP_SENTINEL);
+        assert!(result2.is_err());
+        match result2.unwrap_err() {
+            ClientInfoError::InvalidIpAddress(msg) => {
+                assert!(msg.contains("mode mismatch"));
+            }
+            _ => panic!("Expected InvalidIpAddress error"),
+        }
     }
 }

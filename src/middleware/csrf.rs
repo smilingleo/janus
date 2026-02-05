@@ -82,16 +82,8 @@ async fn validate_csrf_impl(
             StatusCode::FORBIDDEN
         })?;
 
-    // Extract current client IP and fingerprint
-    let current_ip = crate::client_info::extract_client_ip(&headers).map_err(|e| {
-        tracing::warn!(
-            session_id = %session_id,
-            error = ?e,
-            "Failed to extract client IP"
-        );
-        StatusCode::UNAUTHORIZED
-    })?;
-
+    // Extract current client IP and fingerprint (with fallback)
+    let current_ip = crate::client_info::extract_client_ip_or_local(&headers);
     let current_fingerprint = Fingerprint::from_headers(&headers);
 
     // Validate against stored session
@@ -109,13 +101,14 @@ async fn validate_csrf_impl(
             StatusCode::UNAUTHORIZED
         })?;
 
-        // Validate client IP
-        if session_data.client_ip != current_ip {
+        // Validate client IP (with sentinel value support)
+        if let Err(e) = crate::client_info::validate_ip_match(&session_data.client_ip, &current_ip) {
             tracing::warn!(
                 session_id = %session_id,
                 expected_ip = %session_data.client_ip,
                 actual_ip = %current_ip,
-                "Security: IP address mismatch detected"
+                error = %e,
+                "Security: IP validation failed"
             );
             return Err(StatusCode::FORBIDDEN);
         }
@@ -360,5 +353,93 @@ mod tests {
             .unwrap();
 
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn test_csrf_local_ip_sentinel() {
+        use crate::client_info::LOCAL_IP_SENTINEL;
+
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+        sessions.write().unwrap().insert(
+            "test-session".to_string(),
+            SessionData {
+                csrf_token: "correct-token".to_string(),
+                created_at: SystemTime::now(),
+                last_activity: SystemTime::now(),
+                client_ip: LOCAL_IP_SENTINEL.to_string(),
+                fingerprint: Fingerprint {
+                    user_agent: "Mozilla/5.0".to_string(),
+                    accept: "text/html".to_string(),
+                    accept_language: "en-US".to_string(),
+                    accept_encoding: "gzip".to_string(),
+                },
+            },
+        );
+
+        let app = create_test_app(sessions);
+
+        // Request without X-Forwarded-For should get sentinel value and pass validation
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/protected")
+                    .method(Method::POST)
+                    .header("Cookie", "session_id=test-session")
+                    .header("X-CSRF-Token", "correct-token")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html")
+                    .header("Accept-Language", "en-US")
+                    .header("Accept-Encoding", "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_csrf_ip_mode_mismatch() {
+        use crate::client_info::LOCAL_IP_SENTINEL;
+
+        let sessions = Arc::new(RwLock::new(HashMap::new()));
+        sessions.write().unwrap().insert(
+            "test-session".to_string(),
+            SessionData {
+                csrf_token: "correct-token".to_string(),
+                created_at: SystemTime::now(),
+                last_activity: SystemTime::now(),
+                client_ip: "203.0.113.1".to_string(), // Real IP stored
+                fingerprint: Fingerprint {
+                    user_agent: "Mozilla/5.0".to_string(),
+                    accept: "text/html".to_string(),
+                    accept_language: "en-US".to_string(),
+                    accept_encoding: "gzip".to_string(),
+                },
+            },
+        );
+
+        let app = create_test_app(sessions);
+
+        // Request without X-Forwarded-For (gets sentinel) should fail when session has real IP
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/protected")
+                    .method(Method::POST)
+                    .header("Cookie", "session_id=test-session")
+                    .header("X-CSRF-Token", "correct-token")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html")
+                    .header("Accept-Language", "en-US")
+                    .header("Accept-Encoding", "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::FORBIDDEN);
     }
 }
