@@ -39,6 +39,29 @@ The release binary (~10MB) includes:
 
 ## Quick Start
 
+You can configure Janus using either a config file or CLI arguments (or both - CLI arguments override config file settings).
+
+### Option A: CLI-Based Setup (No Config File)
+
+For quick deployments without creating a config file:
+
+```bash
+# Start Janus with all settings via CLI
+./target/release/janus \
+  --bind 127.0.0.1:8080 \
+  --https \
+  --phone "+1234567890" \
+  --origin "https://*.ngrok-free.app"
+```
+
+This is useful for:
+- Quick testing
+- Dynamic environments
+- Containerized deployments with environment-based config
+- When you don't want to manage config files
+
+### Option B: Config File Setup
+
 ### 1. Configure Janus
 
 Create/update `config.toml`:
@@ -164,6 +187,46 @@ token_validity_secs = 300
 # Less secure: 1 hour (not recommended for public)
 token_validity_secs = 3600
 ```
+
+## Hybrid Configuration
+
+You can combine config file with CLI arguments for flexible deployments:
+
+```bash
+# Base config in config.toml, override specific settings via CLI
+./target/release/janus \
+  --config production.toml \
+  --bind 0.0.0.0:8080 \
+  --origin "https://my-dynamic-url.ngrok.io"
+```
+
+**Common patterns:**
+
+1. **Development override:**
+   ```bash
+   # Use production config but bind to different port
+   ./janus --config prod.toml --bind 127.0.0.1:9090
+   ```
+
+2. **Dynamic origin (ngrok free tier):**
+   ```bash
+   # Config file has static settings, override origin for each ngrok session
+   ./janus --origin "https://abc123.ngrok-free.app"
+   ```
+
+3. **Testing with different phone:**
+   ```bash
+   # Use test phone number without modifying config
+   ./janus --phone "+15555555555"
+   ```
+
+4. **Disable HTTPS temporarily:**
+   ```bash
+   # Override config file's HTTPS setting for local testing
+   ./janus --no-https
+   ```
+
+**Precedence:** CLI arguments always override config file settings.
 
 ## Usage Workflow
 

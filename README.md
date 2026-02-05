@@ -81,7 +81,7 @@ use_https = false
 ### Running
 
 ```bash
-# Start the server
+# Start with config file (default: config.toml)
 ./target/release/janus
 
 # Or in development:
@@ -89,6 +89,46 @@ cargo run
 ```
 
 The server will start on `http://127.0.0.1:8080` by default.
+
+### Command-Line Options
+
+CLI arguments override settings from the config file:
+
+```bash
+# Use custom config file
+./target/release/janus --config /path/to/config.toml
+
+# Override bind address
+./target/release/janus --bind 127.0.0.1:9090
+
+# Enable HTTPS
+./target/release/janus --https
+
+# Set phone number for notifications
+./target/release/janus --phone +1234567890
+
+# Configure allowed origins (can specify multiple)
+./target/release/janus --origin "https://example.ngrok.io" --origin "https://*.ngrok-free.app"
+
+# Override session log directory
+./target/release/janus --log-dir ~/.janus/logs
+
+# Combine multiple options
+./target/release/janus \
+  --bind 127.0.0.1:8080 \
+  --https \
+  --phone +1234567890 \
+  --origin "https://*.ngrok-free.app"
+```
+
+**Available Options:**
+- `-c, --config <FILE>` - Path to configuration file (default: config.toml)
+- `-b, --bind <ADDRESS>` - Bind address with port (e.g., 127.0.0.1:8080)
+- `--https` - Enable HTTPS
+- `--no-https` - Disable HTTPS (overrides --https)
+- `-o, --origin <ORIGIN>` - Allowed CORS origins (can be specified multiple times)
+- `-p, --phone <NUMBER>` - Phone number for iMessage (e.g., +1234567890)
+- `-l, --log-dir <DIR>` - Session log directory
 
 ## Usage
 

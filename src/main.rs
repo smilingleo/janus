@@ -50,6 +50,26 @@ struct Cli {
     /// Session log directory (overrides config file)
     #[arg(short = 'l', long = "log-dir", value_name = "DIR")]
     log_dir: Option<PathBuf>,
+
+    /// Bind address (overrides config file)
+    #[arg(short = 'b', long = "bind", value_name = "ADDRESS")]
+    bind_address: Option<String>,
+
+    /// Enable HTTPS (overrides config file)
+    #[arg(long = "https")]
+    use_https: bool,
+
+    /// Disable HTTPS (overrides config file and --https flag)
+    #[arg(long = "no-https", conflicts_with = "use_https")]
+    no_https: bool,
+
+    /// Allowed origins for CORS (overrides config file, can be specified multiple times)
+    #[arg(short = 'o', long = "origin", value_name = "ORIGIN")]
+    allowed_origins: Vec<String>,
+
+    /// Phone number for iMessage notifications (overrides config file)
+    #[arg(short = 'p', long = "phone", value_name = "NUMBER")]
+    phone_number: Option<String>,
 }
 
 /// Server state containing start time for uptime tracking and auth components
@@ -1275,6 +1295,107 @@ async fn main() {
             "Using session log directory from command line"
         );
         config.session_log_dir = expanded_path;
+    }
+
+    // Override bind_address if provided via CLI
+    if let Some(bind_addr) = cli.bind_address {
+        // Validate bind address format
+        if !bind_addr.contains(':') {
+            tracing::error!(
+                bind_address = %bind_addr,
+                "Invalid bind address format: must include port (e.g., 127.0.0.1:8080)"
+            );
+            std::process::exit(1);
+        }
+        tracing::info!(
+            bind_address = %bind_addr,
+            "Using bind address from command line"
+        );
+        config.bind_address = bind_addr;
+    }
+
+    // Override use_https if provided via CLI
+    if cli.use_https {
+        tracing::info!("Enabling HTTPS from command line");
+        config.use_https = true;
+    } else if cli.no_https {
+        tracing::info!("Disabling HTTPS from command line");
+        config.use_https = false;
+    }
+
+    // Override allowed_origins if provided via CLI
+    if !cli.allowed_origins.is_empty() {
+        // Validate origin format
+        for origin in &cli.allowed_origins {
+            if !origin.starts_with("https://")
+                && !origin.starts_with("http://127.0.0.1:")
+                && !origin.starts_with("http://localhost:") {
+                tracing::error!(
+                    origin = %origin,
+                    "Invalid origin format: public origins must use HTTPS, local origins can use HTTP"
+                );
+                std::process::exit(1);
+            }
+
+            // Validate wildcard patterns
+            if origin.contains('*') {
+                let wildcard_count = origin.matches('*').count();
+                if wildcard_count != 1 {
+                    tracing::error!(
+                        origin = %origin,
+                        "Invalid origin pattern: must contain exactly one wildcard (*)"
+                    );
+                    std::process::exit(1);
+                }
+                if !origin.starts_with("https://*.") && !origin.starts_with("http://*.") {
+                    tracing::error!(
+                        origin = %origin,
+                        "Invalid origin pattern: wildcard must be in subdomain position (e.g., https://*.example.com)"
+                    );
+                    std::process::exit(1);
+                }
+            }
+        }
+
+        tracing::info!(
+            origins = ?cli.allowed_origins,
+            "Using allowed origins from command line"
+        );
+        config.allowed_origins = cli.allowed_origins;
+
+        // When allowed_origins is set via CLI, enforce HTTPS unless explicitly disabled
+        if !cli.no_https && !config.use_https {
+            tracing::warn!("Allowed origins configured but HTTPS is disabled - this is insecure");
+            tracing::warn!("Consider using --https flag for production deployments");
+        }
+    }
+
+    // Override phone_number if provided via CLI
+    if let Some(phone) = cli.phone_number {
+        // Validate phone number format (must start with + and contain 4-20 digits)
+        if !phone.starts_with('+') {
+            tracing::error!(
+                phone_number = %phone,
+                "Invalid phone number format: must start with + (e.g., +1234567890)"
+            );
+            std::process::exit(1);
+        }
+        let digits = &phone[1..];
+        let digit_count = digits.len();
+        if digit_count < 4 || digit_count > 20 || !digits.chars().all(|c| c.is_ascii_digit()) {
+            tracing::error!(
+                phone_number = %phone,
+                "Invalid phone number format: must contain 4-20 digits after +"
+            );
+            std::process::exit(1);
+        }
+        tracing::info!(
+            phone_number = %phone,
+            "Using phone number from command line"
+        );
+        config.notification = janus::config::NotificationConfig::IMessage {
+            phone_number: phone,
+        };
     }
 
     let bind_address = config.bind_address.clone();
