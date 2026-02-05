@@ -4,6 +4,7 @@
 //! including authentication, session management, notifications, and logging.
 
 pub mod auth;
+pub mod client_info;
 pub mod config;
 pub mod error;
 pub mod logger;

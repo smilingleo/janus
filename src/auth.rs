@@ -39,6 +39,7 @@ pub struct TokenMetadata {
     pub created_at: SystemTime,
     pub expires_at: SystemTime,
     pub used: AtomicBool,
+    pub client_ip: String,
 }
 
 /// Thread-safe storage for authentication tokens and their metadata.
@@ -64,13 +65,16 @@ impl TokenStore {
     ///
     /// Implements collision detection with retry logic (max 3 attempts).
     ///
+    /// # Arguments
+    /// * `client_ip` - The IP address of the client requesting the token
+    ///
     /// # Returns
     /// A 64-character hexadecimal string representing the token
     ///
     /// # Errors
     /// Returns `AuthError::LockPoisoned` if the internal lock is poisoned
     /// Returns `AuthError::TokenGenerationFailed` if token generation repeatedly collides
-    pub fn generate_and_store(&self) -> Result<String, AuthError> {
+    pub fn generate_and_store(&self, client_ip: String) -> Result<String, AuthError> {
         let mut attempts = 0;
 
         loop {
@@ -82,6 +86,7 @@ impl TokenStore {
                 created_at: now,
                 expires_at,
                 used: AtomicBool::new(false),
+                client_ip: client_ip.clone(),
             };
 
             let mut tokens = self.tokens.write()
@@ -221,6 +226,27 @@ impl TokenStore {
 
         Ok(())
     }
+
+    /// Get the client IP address associated with a token.
+    ///
+    /// # Arguments
+    /// * `token` - The token to look up
+    ///
+    /// # Returns
+    /// `Ok(String)` containing the client IP address
+    ///
+    /// # Errors
+    /// * `AuthError::InvalidToken` - Token does not exist
+    /// * `AuthError::LockPoisoned` - Internal lock is poisoned
+    pub fn get_token_ip(&self, token: &str) -> Result<String, AuthError> {
+        let tokens = self.tokens.read()
+            .map_err(|_| AuthError::LockPoisoned)?;
+
+        let metadata = tokens.get(token)
+            .ok_or(AuthError::InvalidToken)?;
+
+        Ok(metadata.client_ip.clone())
+    }
 }
 
 /// Generate a cryptographically secure random token.
@@ -323,7 +349,7 @@ mod tests {
     #[test]
     fn test_token_metadata_stores_correct_timestamps() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // Token should exist and be valid
         assert!(store.is_valid(&token).expect("Check should succeed"));
@@ -339,6 +365,7 @@ mod tests {
             created_at: now,
             expires_at: now + Duration::from_secs(3600),
             used: AtomicBool::new(false),
+            client_ip: "192.168.1.1".to_string(),
         };
         assert!(!is_expired(&future_metadata));
 
@@ -347,6 +374,7 @@ mod tests {
             created_at: now - Duration::from_secs(7200),
             expires_at: now - Duration::from_secs(3600),
             used: AtomicBool::new(false),
+            client_ip: "192.168.1.1".to_string(),
         };
         assert!(is_expired(&past_metadata));
     }
@@ -362,7 +390,7 @@ mod tests {
             let handle = thread::spawn(move || {
                 let mut tokens = Vec::new();
                 for _ in 0..10 {
-                    tokens.push(store_clone.generate_and_store().expect("Token generation should succeed"));
+                    tokens.push(store_clone.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed"));
                 }
                 tokens
             });
@@ -403,12 +431,12 @@ mod tests {
     fn test_token_store_with_different_validity_periods() {
         // Test with short validity
         let short_store = TokenStore::new(60);
-        let token = short_store.generate_and_store().expect("Token generation should succeed");
+        let token = short_store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
         assert!(short_store.is_valid(&token).expect("Check should succeed"));
 
         // Test with long validity
         let long_store = TokenStore::new(7200);
-        let token = long_store.generate_and_store().expect("Token generation should succeed");
+        let token = long_store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
         assert!(long_store.is_valid(&token).expect("Check should succeed"));
     }
 
@@ -417,8 +445,8 @@ mod tests {
         let store = TokenStore::new(1); // 1 second validity
 
         // Generate some tokens
-        let _ = store.generate_and_store().expect("Token generation should succeed");
-        let _ = store.generate_and_store().expect("Token generation should succeed");
+        let _ = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
+        let _ = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // Wait for expiry
         std::thread::sleep(Duration::from_secs(2));
@@ -431,7 +459,7 @@ mod tests {
     #[test]
     fn test_generate_and_store_returns_result() {
         let store = TokenStore::new(3600);
-        let result = store.generate_and_store();
+        let result = store.generate_and_store("192.168.1.1".to_string());
         assert!(result.is_ok());
 
         let token = result.unwrap();
@@ -441,7 +469,7 @@ mod tests {
     #[test]
     fn test_validate_token_with_valid_token() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // Validation should succeed
         let result = store.validate_token(&token);
@@ -461,7 +489,7 @@ mod tests {
     #[test]
     fn test_validate_token_with_expired_token() {
         let store = TokenStore::new(1); // 1 second validity
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // Wait for expiry
         std::thread::sleep(Duration::from_secs(2));
@@ -475,7 +503,7 @@ mod tests {
     #[test]
     fn test_validate_token_with_already_used_token() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // First validation should succeed
         store.validate_token(&token).expect("First validation should succeed");
@@ -489,7 +517,7 @@ mod tests {
     #[test]
     fn test_mark_used_once_idempotency() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         // First call should succeed
         let result = store.mark_used_once(&token);
@@ -514,7 +542,7 @@ mod tests {
     #[test]
     fn test_concurrent_validation_only_one_succeeds() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         let store_clone1 = store.clone();
         let store_clone2 = store.clone();
@@ -546,7 +574,7 @@ mod tests {
     #[test]
     fn test_concurrent_mark_used_once_only_one_succeeds() {
         let store = TokenStore::new(3600);
-        let token = store.generate_and_store().expect("Token generation should succeed");
+        let token = store.generate_and_store("192.168.1.1".to_string()).expect("Token generation should succeed");
 
         let store_clone1 = store.clone();
         let store_clone2 = store.clone();
@@ -583,6 +611,7 @@ mod tests {
             created_at: now - Duration::from_secs(1),
             expires_at: now,
             used: AtomicBool::new(false),
+            client_ip: "192.168.1.1".to_string(),
         };
 
         // Should be expired when now >= expires_at

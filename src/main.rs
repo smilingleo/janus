@@ -150,17 +150,40 @@ async fn health_check(State(state): State<Arc<AppState>>) -> Json<HealthResponse
 /// Token generation endpoint - generates auth token and sends via iMessage
 ///
 /// This endpoint:
-/// 1. Generates a cryptographically secure token
-/// 2. Stores it with expiration metadata
-/// 3. Sends it via the configured notification channel (iMessage)
-/// 4. Returns success/failure status
+/// 1. Extracts client IP address
+/// 2. Generates a cryptographically secure token
+/// 3. Stores it with expiration metadata and client IP
+/// 4. Sends it via the configured notification channel (iMessage)
+/// 5. Returns success/failure status
 ///
 /// Rate limited to 3 requests per minute to prevent abuse.
 async fn generate_token(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
 ) -> (StatusCode, Json<TokenGenerateResponse>) {
-    // Generate and store token
-    let token = match state.token_store.generate_and_store() {
+    // Extract client IP address
+    let client_ip = match janus::client_info::extract_client_ip(&headers) {
+        Ok(ip) => {
+            tracing::info!(
+                client_ip = %ip,
+                "Token generation request from IP"
+            );
+            ip
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "Failed to extract client IP");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(TokenGenerateResponse {
+                    success: false,
+                    message: "Failed to identify client".to_string(),
+                }),
+            );
+        }
+    };
+
+    // Generate and store token with client IP
+    let token = match state.token_store.generate_and_store(client_ip) {
         Ok(token) => {
             tracing::info!(
                 token_length = token.len(),
@@ -211,16 +234,20 @@ async fn generate_token(
 /// Login endpoint - validates token and creates authenticated session
 ///
 /// This endpoint:
-/// 1. Validates the provided token (existence, expiry, one-time use)
-/// 2. Atomically marks the token as used (prevents reuse)
-/// 3. Generates a session ID
-/// 4. Sets a secure session cookie
-/// 5. Generates and returns a CSRF token
+/// 1. Extracts client IP and browser fingerprint
+/// 2. Validates the provided token (existence, expiry, one-time use)
+/// 3. Validates IP address matches token generation IP
+/// 4. Atomically marks the token as used (prevents reuse)
+/// 5. Generates a session ID
+/// 6. Sets a secure session cookie
+/// 7. Generates and returns a CSRF token
 ///
 /// Returns 200 OK with CSRF token on success
 /// Returns 401 Unauthorized if token is invalid, expired, or already used
+/// Returns 403 Forbidden if IP address doesn't match
 async fn login(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     cookies: Cookies,
     Json(request): Json<LoginRequest>,
 ) -> (StatusCode, Json<LoginResponse>) {
@@ -228,6 +255,44 @@ async fn login(
         token_length = request.token.len(),
         "Login attempt"
     );
+
+    // Extract client IP address
+    let client_ip = match janus::client_info::extract_client_ip(&headers) {
+        Ok(ip) => {
+            tracing::info!(
+                client_ip = %ip,
+                "Login request from IP"
+            );
+            ip
+        }
+        Err(e) => {
+            tracing::error!(error = ?e, "Failed to extract client IP");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(LoginResponse {
+                    success: false,
+                    message: "Failed to identify client".to_string(),
+                    csrf_token: None,
+                    session_duration_secs: None,
+                }),
+            );
+        }
+    };
+
+    // Extract browser fingerprint
+    let fingerprint = janus::client_info::Fingerprint::from_headers(&headers);
+    if !fingerprint.is_valid() {
+        tracing::warn!("Login attempt with invalid browser fingerprint");
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(LoginResponse {
+                success: false,
+                message: "Invalid client fingerprint".to_string(),
+                csrf_token: None,
+                session_duration_secs: None,
+            }),
+        );
+    }
 
     // Validate token format (should be 64-char hex string)
     if request.token.len() != 64 || !request.token.chars().all(|c| c.is_ascii_hexdigit()) {
@@ -246,6 +311,40 @@ async fn login(
         );
     }
 
+    // Get the IP address associated with this token and validate it matches
+    match state.token_store.get_token_ip(&request.token) {
+        Ok(token_ip) => {
+            if token_ip != client_ip {
+                tracing::warn!(
+                    token_ip = %token_ip,
+                    request_ip = %client_ip,
+                    "Security: IP address mismatch during login"
+                );
+                return (
+                    StatusCode::FORBIDDEN,
+                    Json(LoginResponse {
+                        success: false,
+                        message: "IP address validation failed".to_string(),
+                        csrf_token: None,
+                        session_duration_secs: None,
+                    }),
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = ?e, "Failed to get token IP");
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(LoginResponse {
+                    success: false,
+                    message: "Invalid token".to_string(),
+                    csrf_token: None,
+                    session_duration_secs: None,
+                }),
+            );
+        }
+    }
+
     // Validate token atomically (checks existence, expiry, marks as used)
     match state.token_store.validate_token(&request.token) {
         Ok(()) => {
@@ -257,7 +356,7 @@ async fn login(
             // Generate CSRF token
             let csrf_token = generate_csrf_token();
 
-            // Store session server-side
+            // Store session server-side with IP and fingerprint
             {
                 let mut sessions = match state.sessions.write() {
                     Ok(guard) => guard,
@@ -281,9 +380,17 @@ async fn login(
                         csrf_token: csrf_token.clone(),
                         created_at: now,
                         last_activity: now,
+                        client_ip: client_ip.clone(),
+                        fingerprint: fingerprint.clone(),
                     },
                 );
             }
+
+            tracing::info!(
+                client_ip = %client_ip,
+                user_agent = %fingerprint.user_agent,
+                "Session created with security validation"
+            );
 
             // Create session cookie
             let cookie = build_session_cookie(

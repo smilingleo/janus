@@ -9,6 +9,7 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use crate::client_info::Fingerprint;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::SystemTime;
@@ -20,6 +21,8 @@ pub struct SessionData {
     pub csrf_token: String,
     pub created_at: SystemTime,
     pub last_activity: SystemTime,
+    pub client_ip: String,
+    pub fingerprint: Fingerprint,
 }
 
 /// Creates a CSRF validation middleware with the given sessions storage.
@@ -79,6 +82,18 @@ async fn validate_csrf_impl(
             StatusCode::FORBIDDEN
         })?;
 
+    // Extract current client IP and fingerprint
+    let current_ip = crate::client_info::extract_client_ip(&headers).map_err(|e| {
+        tracing::warn!(
+            session_id = %session_id,
+            error = ?e,
+            "Failed to extract client IP"
+        );
+        StatusCode::UNAUTHORIZED
+    })?;
+
+    let current_fingerprint = Fingerprint::from_headers(&headers);
+
     // Validate against stored session
     let is_valid = {
         let sessions_guard = sessions.read().map_err(|_| {
@@ -93,6 +108,26 @@ async fn validate_csrf_impl(
             );
             StatusCode::UNAUTHORIZED
         })?;
+
+        // Validate client IP
+        if session_data.client_ip != current_ip {
+            tracing::warn!(
+                session_id = %session_id,
+                expected_ip = %session_data.client_ip,
+                actual_ip = %current_ip,
+                "Security: IP address mismatch detected"
+            );
+            return Err(StatusCode::FORBIDDEN);
+        }
+
+        // Validate fingerprint
+        if !session_data.fingerprint.matches(&current_fingerprint) {
+            tracing::warn!(
+                session_id = %session_id,
+                "Security: Browser fingerprint mismatch detected"
+            );
+            return Err(StatusCode::FORBIDDEN);
+        }
 
         // Constant-time comparison to prevent timing attacks
         use subtle::ConstantTimeEq;
@@ -190,6 +225,13 @@ mod tests {
                 csrf_token: "test-token".to_string(),
                 created_at: SystemTime::now(),
                 last_activity: SystemTime::now(),
+                client_ip: "203.0.113.1".to_string(),
+                fingerprint: Fingerprint {
+                    user_agent: "Mozilla/5.0".to_string(),
+                    accept: "text/html".to_string(),
+                    accept_language: "en-US".to_string(),
+                    accept_encoding: "gzip".to_string(),
+                },
             },
         );
 
@@ -201,6 +243,11 @@ mod tests {
                     .uri("/protected")
                     .method(Method::POST)
                     .header("Cookie", "session_id=test-session")
+                    .header("X-Forwarded-For", "203.0.113.1")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html")
+                    .header("Accept-Language", "en-US")
+                    .header("Accept-Encoding", "gzip")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -219,6 +266,13 @@ mod tests {
                 csrf_token: "correct-token".to_string(),
                 created_at: SystemTime::now(),
                 last_activity: SystemTime::now(),
+                client_ip: "203.0.113.1".to_string(),
+                fingerprint: Fingerprint {
+                    user_agent: "Mozilla/5.0".to_string(),
+                    accept: "text/html".to_string(),
+                    accept_language: "en-US".to_string(),
+                    accept_encoding: "gzip".to_string(),
+                },
             },
         );
 
@@ -231,6 +285,11 @@ mod tests {
                     .method(Method::POST)
                     .header("Cookie", "session_id=test-session")
                     .header("X-CSRF-Token", "wrong-token")
+                    .header("X-Forwarded-For", "203.0.113.1")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html")
+                    .header("Accept-Language", "en-US")
+                    .header("Accept-Encoding", "gzip")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -249,6 +308,13 @@ mod tests {
                 csrf_token: "correct-token".to_string(),
                 created_at: SystemTime::now(),
                 last_activity: SystemTime::now(),
+                client_ip: "203.0.113.1".to_string(),
+                fingerprint: Fingerprint {
+                    user_agent: "Mozilla/5.0".to_string(),
+                    accept: "text/html".to_string(),
+                    accept_language: "en-US".to_string(),
+                    accept_encoding: "gzip".to_string(),
+                },
             },
         );
 
@@ -261,6 +327,11 @@ mod tests {
                     .method(Method::POST)
                     .header("Cookie", "session_id=test-session")
                     .header("X-CSRF-Token", "correct-token")
+                    .header("X-Forwarded-For", "203.0.113.1")
+                    .header("User-Agent", "Mozilla/5.0")
+                    .header("Accept", "text/html")
+                    .header("Accept-Language", "en-US")
+                    .header("Accept-Encoding", "gzip")
                     .body(Body::empty())
                     .unwrap(),
             )
