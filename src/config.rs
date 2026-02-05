@@ -94,11 +94,11 @@ fn default_max_sessions() -> usize {
 }
 
 fn default_log_dir() -> PathBuf {
-    PathBuf::from("~/.janus/logs")
+    PathBuf::from(".janus/logs")
 }
 
 fn default_session_log_dir() -> PathBuf {
-    PathBuf::from("~/.janus/session-logs")
+    PathBuf::from(".janus/session-logs")
 }
 
 fn default_use_https() -> bool {

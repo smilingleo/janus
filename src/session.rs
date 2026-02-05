@@ -112,6 +112,14 @@ impl SessionManager {
         }
     }
 
+    /// Get a reference to the session logger
+    ///
+    /// # Returns
+    /// Option containing a reference to the SessionLogger if one is configured
+    pub fn session_logger(&self) -> Option<&SessionLogger> {
+        self.session_logger.as_ref()
+    }
+
     /// Generate a unique session ID with timestamp
     ///
     /// Format: YYYY-MM-DD-HH-MM-SS-<8-char-random-suffix>
@@ -137,6 +145,8 @@ impl SessionManager {
     /// # Arguments
     /// * `shell_command` - Optional shell command (defaults to $SHELL or /bin/bash)
     /// * `initial_size` - Initial PTY size (default: 80x24)
+    /// * `client_ip` - Client IP address for audit logging
+    /// * `user_agent` - Client User-Agent for audit logging
     ///
     /// # Returns
     /// Session ID on success
@@ -150,6 +160,8 @@ impl SessionManager {
         &self,
         shell_command: Option<String>,
         initial_size: Option<PtySize>,
+        client_ip: String,
+        user_agent: String,
     ) -> Result<String, SessionError> {
         let mut sessions = self
             .sessions
@@ -240,6 +252,8 @@ impl SessionManager {
                 shell.clone(),
                 pty_size.rows,
                 pty_size.cols,
+                client_ip,
+                user_agent,
             );
         }
 
@@ -719,15 +733,15 @@ mod tests {
         let manager = SessionManager::new(2);
 
         // Create first session
-        let session1 = manager.create_session(None, None);
+        let session1 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string());
         assert!(session1.is_ok());
 
         // Create second session
-        let session2 = manager.create_session(None, None);
+        let session2 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string());
         assert!(session2.is_ok());
 
         // Third session should fail
-        let session3 = manager.create_session(None, None);
+        let session3 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string());
         assert!(session3.is_err());
         assert!(matches!(session3.unwrap_err(), SessionError::LimitReached(_)));
     }
@@ -737,7 +751,7 @@ mod tests {
         let manager = SessionManager::new(4);
 
         // Create session
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Verify it exists
         assert!(manager.get_session(&session_id).is_ok());
@@ -758,7 +772,7 @@ mod tests {
     #[test]
     fn test_touch_session() {
         let manager = SessionManager::new(4);
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Touch session (update last activity)
         std::thread::sleep(std::time::Duration::from_millis(100));
@@ -784,7 +798,12 @@ mod tests {
 
         // Create a session with a command that exits immediately
         let session_id = manager
-            .create_session(Some("true".to_string()), None)
+            .create_session(
+                Some("true".to_string()),
+                None,
+                "192.168.1.1".to_string(),
+                "test-agent".to_string(),
+            )
             .unwrap();
 
         // Verify session exists
@@ -810,7 +829,7 @@ mod tests {
         let manager = SessionManager::new(4);
 
         // Create a long-running session
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Immediately reap (should find nothing)
         let reaped = manager.reap_dead_sessions().unwrap();
@@ -829,7 +848,7 @@ mod tests {
         let manager = SessionManager::new(4);
 
         // Create a session
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Verify session exists
         assert!(manager.get_session(&session_id).is_ok());
@@ -852,7 +871,7 @@ mod tests {
         let manager = SessionManager::new(4);
 
         // Create a session
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Immediately check for idle sessions with a long timeout
         let cleaned = manager.cleanup_idle_sessions(3600).unwrap();
@@ -871,7 +890,7 @@ mod tests {
         let manager = SessionManager::new(4);
 
         // Create a session
-        let session_id = manager.create_session(None, None).unwrap();
+        let session_id = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).unwrap();
 
         // Wait to make it idle
         std::thread::sleep(std::time::Duration::from_secs(2));

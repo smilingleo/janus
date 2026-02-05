@@ -182,6 +182,18 @@ async fn generate_token(
         }
     };
 
+    // Extract user agent
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
+    // Log token request to audit trail
+    if let Some(ref logger) = state.session_manager.session_logger() {
+        let _ = logger.log_token_requested(client_ip.clone(), user_agent.clone());
+    }
+
     // Generate and store token with client IP
     let token = match state.token_store.generate_and_store(client_ip) {
         Ok(token) => {
@@ -488,8 +500,32 @@ async fn list_sessions(
 /// Requires authentication (valid session cookie).
 async fn create_session(
     State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
     Json(request): Json<CreateSessionRequest>,
 ) -> (StatusCode, Json<CreateSessionResponse>) {
+    // Extract client IP address
+    let client_ip = match janus::client_info::extract_client_ip(&headers) {
+        Ok(ip) => ip,
+        Err(e) => {
+            tracing::error!(error = ?e, "Failed to extract client IP");
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(CreateSessionResponse {
+                    success: false,
+                    message: "Failed to identify client".to_string(),
+                    session_id: None,
+                }),
+            );
+        }
+    };
+
+    // Extract user agent
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+
     // Validate PTY dimensions if provided
     if let Some(rows) = request.rows {
         if rows == 0 || rows > 999 {
@@ -532,7 +568,7 @@ async fn create_session(
 
     match state
         .session_manager
-        .create_session(request.shell_command, pty_size)
+        .create_session(request.shell_command, pty_size, client_ip, user_agent)
     {
         Ok(session_id) => {
             tracing::info!(session_id = %session_id, "Created terminal session");
@@ -625,8 +661,17 @@ async fn websocket_handler(
     ws: WebSocketUpgrade,
     State(state): State<Arc<AppState>>,
     AxumPath(session_id): AxumPath<String>,
+    headers: HeaderMap,
     cookies: Cookies,
 ) -> Result<Response, StatusCode> {
+    // Extract client IP and user agent for logging
+    let client_ip = janus::client_info::extract_client_ip(&headers)
+        .unwrap_or_else(|_| "unknown".to_string());
+    let user_agent = headers
+        .get("user-agent")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
     // Check authentication - validate session cookie exists and is valid
     let auth_session_id = cookies
         .get("session_id")
@@ -669,8 +714,18 @@ async fn websocket_handler(
 
     tracing::info!(
         session_id = %session_id,
+        client_ip = %client_ip,
         "WebSocket connection established"
     );
+
+    // Log WebSocket connection to audit trail
+    if let Some(ref logger) = state.session_manager.session_logger() {
+        let _ = logger.log_websocket_connected(
+            session_id.clone(),
+            client_ip.clone(),
+            user_agent.clone(),
+        );
+    }
 
     // Upgrade to WebSocket and handle the connection
     Ok(ws.on_upgrade(move |socket| handle_websocket(socket, session_id, state)))

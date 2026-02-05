@@ -26,12 +26,25 @@ pub enum SessionLoggerError {
 /// Types of log events that can be recorded
 #[derive(Debug, Clone)]
 pub enum LogEvent {
+    /// Token requested
+    TokenRequested {
+        client_ip: String,
+        user_agent: String,
+    },
     /// Session created
     SessionCreated {
         session_id: String,
         shell_command: String,
         rows: u16,
         cols: u16,
+        client_ip: String,
+        user_agent: String,
+    },
+    /// WebSocket connection established
+    WebSocketConnected {
+        session_id: String,
+        client_ip: String,
+        user_agent: String,
     },
     /// Data received from client (input to PTY)
     Input { session_id: String, data: Vec<u8> },
@@ -100,6 +113,18 @@ impl SessionLogger {
             .map_err(|_| SessionLoggerError::ChannelClosed)
     }
 
+    /// Log token request (convenience method)
+    pub fn log_token_requested(
+        &self,
+        client_ip: String,
+        user_agent: String,
+    ) -> Result<(), SessionLoggerError> {
+        self.log(LogEvent::TokenRequested {
+            client_ip,
+            user_agent,
+        })
+    }
+
     /// Log session creation (convenience method)
     pub fn log_session_created(
         &self,
@@ -107,12 +132,30 @@ impl SessionLogger {
         shell_command: String,
         rows: u16,
         cols: u16,
+        client_ip: String,
+        user_agent: String,
     ) -> Result<(), SessionLoggerError> {
         self.log(LogEvent::SessionCreated {
             session_id,
             shell_command,
             rows,
             cols,
+            client_ip,
+            user_agent,
+        })
+    }
+
+    /// Log WebSocket connection (convenience method)
+    pub fn log_websocket_connected(
+        &self,
+        session_id: String,
+        client_ip: String,
+        user_agent: String,
+    ) -> Result<(), SessionLoggerError> {
+        self.log(LogEvent::WebSocketConnected {
+            session_id,
+            client_ip,
+            user_agent,
         })
     }
 
@@ -178,11 +221,44 @@ async fn handle_log_event(
     event: LogEvent,
 ) -> Result<(), SessionLoggerError> {
     match event {
+        LogEvent::TokenRequested {
+            client_ip,
+            user_agent,
+        } => {
+            // Log to a central audit file
+            let audit_path = log_dir.join("token-requests.log");
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&audit_path)
+                .await
+                .map_err(|e| SessionLoggerError::FileCreationFailed(e.to_string()))?;
+
+            let timestamp = chrono::Utc::now().to_rfc3339();
+            let entry = format!(
+                "[{}] TOKEN_REQUESTED: ip={}, user_agent={}\n",
+                timestamp, client_ip, user_agent
+            );
+            file.write_all(entry.as_bytes())
+                .await
+                .map_err(|e| SessionLoggerError::WriteFailed(e.to_string()))?;
+            file.flush()
+                .await
+                .map_err(|e| SessionLoggerError::WriteFailed(e.to_string()))?;
+
+            tracing::debug!(
+                client_ip = %client_ip,
+                user_agent = %user_agent,
+                "Logged token request"
+            );
+        }
         LogEvent::SessionCreated {
             session_id,
             shell_command,
             rows,
             cols,
+            client_ip,
+            user_agent,
         } => {
             // Create log file for this session
             let log_path = log_dir.join(format!("{}.log", session_id));
@@ -193,11 +269,11 @@ async fn handle_log_event(
                 .await
                 .map_err(|e| SessionLoggerError::FileCreationFailed(e.to_string()))?;
 
-            // Write session creation header
+            // Write session creation header with security info
             let timestamp = chrono::Utc::now().to_rfc3339();
             let header = format!(
-                "[{}] SESSION_CREATED: shell={}, size={}x{}\n",
-                timestamp, shell_command, cols, rows
+                "[{}] SESSION_CREATED: shell={}, size={}x{}, client_ip={}, user_agent={}\n",
+                timestamp, shell_command, cols, rows, client_ip, user_agent
             );
             file.write_all(header.as_bytes())
                 .await
@@ -209,8 +285,25 @@ async fn handle_log_event(
             tracing::debug!(
                 session_id = %session_id,
                 log_path = %log_path.display(),
+                client_ip = %client_ip,
                 "Created session log file"
             );
+        }
+        LogEvent::WebSocketConnected {
+            session_id,
+            client_ip,
+            user_agent,
+        } => {
+            if let Some(file) = log_files.get_mut(&session_id) {
+                let timestamp = chrono::Utc::now().to_rfc3339();
+                let entry = format!(
+                    "[{}] WEBSOCKET_CONNECTED: client_ip={}, user_agent={}\n",
+                    timestamp, client_ip, user_agent
+                );
+                file.write_all(entry.as_bytes())
+                    .await
+                    .map_err(|e| SessionLoggerError::WriteFailed(e.to_string()))?;
+            }
         }
         LogEvent::Input { session_id, data } => {
             if let Some(file) = log_files.get_mut(&session_id) {
@@ -288,7 +381,14 @@ mod tests {
 
         // Log a session creation event
         logger
-            .log_session_created("test-session-1".to_string(), "/bin/bash".to_string(), 24, 80)
+            .log_session_created(
+                "test-session-1".to_string(),
+                "/bin/bash".to_string(),
+                24,
+                80,
+                "192.168.1.1".to_string(),
+                "Mozilla/5.0".to_string(),
+            )
             .unwrap();
 
         // Give the background task time to write
@@ -303,6 +403,8 @@ mod tests {
         assert!(content.contains("SESSION_CREATED"));
         assert!(content.contains("shell=/bin/bash"));
         assert!(content.contains("size=80x24"));
+        assert!(content.contains("client_ip=192.168.1.1"));
+        assert!(content.contains("user_agent=Mozilla/5.0"));
     }
 
     #[tokio::test]
@@ -314,7 +416,14 @@ mod tests {
 
         // Log session creation
         logger
-            .log_session_created(session_id.clone(), "/bin/bash".to_string(), 24, 80)
+            .log_session_created(
+                session_id.clone(),
+                "/bin/bash".to_string(),
+                24,
+                80,
+                "192.168.1.1".to_string(),
+                "Mozilla/5.0".to_string(),
+            )
             .unwrap();
 
         // Log input
@@ -354,10 +463,24 @@ mod tests {
 
         // Create multiple sessions
         logger
-            .log_session_created("session-1".to_string(), "/bin/bash".to_string(), 24, 80)
+            .log_session_created(
+                "session-1".to_string(),
+                "/bin/bash".to_string(),
+                24,
+                80,
+                "192.168.1.1".to_string(),
+                "Mozilla/5.0".to_string(),
+            )
             .unwrap();
         logger
-            .log_session_created("session-2".to_string(), "/bin/zsh".to_string(), 30, 120)
+            .log_session_created(
+                "session-2".to_string(),
+                "/bin/zsh".to_string(),
+                30,
+                120,
+                "192.168.1.2".to_string(),
+                "Chrome/90.0".to_string(),
+            )
             .unwrap();
 
         // Log to both sessions

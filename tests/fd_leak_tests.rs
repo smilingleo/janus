@@ -47,7 +47,7 @@ fn test_session_creation_deletion_no_fd_leak() {
     let mut session_ids = Vec::new();
     for i in 0..3 {
         let session_id = manager
-            .create_session(None, None)
+            .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
             .expect(&format!("Failed to create session {}", i));
         session_ids.push(session_id);
     }
@@ -140,7 +140,7 @@ fn test_mixed_operations_no_fd_leak() {
 
     // Create a mix of sessions
     let long_lived = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create long-lived session");
 
     let short_lived = manager

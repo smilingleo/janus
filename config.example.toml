@@ -17,9 +17,8 @@ token_validity_secs = 3600
 max_sessions = 4
 
 # Directory for session logs
-# Supports tilde (~) expansion for home directory
-# (default: "~/.janus/logs")
-log_dir = "~/.janus/logs"
+# (default: ".janus/logs")
+log_dir = ".janus/logs"
 
 # Enable HTTPS (default: false)
 # Required when using allowed_origins for public exposure

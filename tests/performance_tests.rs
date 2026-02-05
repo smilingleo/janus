@@ -43,7 +43,7 @@ fn test_rapid_session_churn() {
 
     for i in 0..iterations {
         let session_id = manager
-            .create_session(None, None)
+            .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
             .expect(&format!("Failed to create session {}", i));
 
         manager
@@ -127,7 +127,7 @@ fn test_concurrent_session_contention() {
             // Create sessions
             for i in 0..ops_per_thread {
                 let session_id = mgr
-                    .create_session(None, None)
+                    .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
                     .expect(&format!("Thread {} failed to create session {}", thread_id, i));
                 session_ids.push(session_id);
             }
@@ -171,7 +171,7 @@ fn test_session_limit_under_load() {
         let mgr = Arc::clone(&manager);
         let handle = thread::spawn(move || {
             // Try to create a session
-            match mgr.create_session(None, None) {
+            match mgr.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()) {
                 Ok(session_id) => {
                     // Successfully created, hold briefly then delete
                     thread::sleep(Duration::from_millis(100));
@@ -207,7 +207,7 @@ fn test_rapid_resize_operations() {
 
     let manager = SessionManager::new(10);
     let session_id = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session");
 
     let start = Instant::now();
@@ -274,7 +274,7 @@ fn test_token_cleanup_performance() {
 fn test_session_activity_updates() {
     let manager = Arc::new(SessionManager::new(20));
     let session_id = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session");
 
     let mut handles = vec![];
@@ -331,7 +331,7 @@ fn test_memory_stability() {
         let mut session_ids = Vec::new();
         for _ in 0..5 {
             let session_id = manager
-                .create_session(None, None)
+                .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
                 .expect("Failed to create session");
             session_ids.push(session_id);
         }
@@ -397,7 +397,7 @@ fn test_session_listing_performance() {
     let mut session_ids = Vec::new();
     for i in 0..25 {
         let session_id = manager
-            .create_session(None, None)
+            .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
             .expect(&format!("Failed to create session {}", i));
         session_ids.push(session_id);
     }

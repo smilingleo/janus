@@ -45,13 +45,13 @@ fn test_session_lifecycle() {
 
     // 2. Create first session
     let session1 = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session 1");
     assert_eq!(manager.session_count().unwrap(), 1);
 
     // 3. Create second session
     let session2 = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session 2");
     assert_eq!(manager.session_count().unwrap(), 2);
 
@@ -96,14 +96,14 @@ fn test_session_limit_enforcement() {
     let manager = SessionManager::new(3);
 
     // Create sessions up to limit
-    let session1 = manager.create_session(None, None).expect("Failed to create session 1");
-    let session2 = manager.create_session(None, None).expect("Failed to create session 2");
-    let session3 = manager.create_session(None, None).expect("Failed to create session 3");
+    let session1 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).expect("Failed to create session 1");
+    let session2 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).expect("Failed to create session 2");
+    let session3 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).expect("Failed to create session 3");
 
     assert_eq!(manager.session_count().unwrap(), 3);
 
     // Attempt to exceed limit
-    let result = manager.create_session(None, None);
+    let result = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string());
     assert!(result.is_err());
     assert_eq!(manager.session_count().unwrap(), 3);
 
@@ -112,7 +112,7 @@ fn test_session_limit_enforcement() {
     assert_eq!(manager.session_count().unwrap(), 2);
 
     // Should be able to create again
-    let session4 = manager.create_session(None, None).expect("Failed to create session 4");
+    let session4 = manager.create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string()).expect("Failed to create session 4");
     assert_eq!(manager.session_count().unwrap(), 3);
 
     // Cleanup
@@ -128,11 +128,11 @@ fn test_idle_timeout_mechanism() {
 
     // Create sessions
     let active_session = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create active session");
 
     let idle_session = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create idle session");
 
     assert_eq!(manager.session_count().unwrap(), 2);
@@ -179,7 +179,7 @@ fn test_process_reaping() {
 
     // Create a long-running session
     let alive_session = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create alive session");
 
     assert_eq!(manager.session_count().unwrap(), 3);
@@ -252,7 +252,7 @@ fn test_concurrent_session_operations() {
         let manager_clone = Arc::clone(&manager);
         let handle = thread::spawn(move || {
             let session_id = manager_clone
-                .create_session(None, None)
+                .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
                 .expect(&format!("Thread {} failed to create session", i));
             // Small delay
             thread::sleep(Duration::from_millis(50));
@@ -278,7 +278,7 @@ fn test_session_activity_tracking() {
     let manager = SessionManager::new(10);
 
     let session_id = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session");
 
     // Get initial activity time
@@ -316,12 +316,17 @@ fn test_pty_resize() {
     let manager = SessionManager::new(10);
 
     let session_id = manager
-        .create_session(None, Some(PtySize {
-            rows: 24,
-            cols: 80,
-            pixel_width: 0,
-            pixel_height: 0,
-        }))
+        .create_session(
+            None,
+            Some(PtySize {
+                rows: 24,
+                cols: 80,
+                pixel_width: 0,
+                pixel_height: 0,
+            }),
+            "192.168.1.1".to_string(),
+            "test-agent".to_string(),
+        )
         .expect("Failed to create session");
 
     // Verify initial size
@@ -424,7 +429,7 @@ fn test_custom_shell_commands() {
 
     // Create session with default shell
     let default_session = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create default session");
 
     // Create session with custom shell (short-lived command)

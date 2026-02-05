@@ -49,15 +49,15 @@ fn test_delete_session_no_zombies() {
     // Create multiple sessions
     // Use default shell for long-running processes (will spawn user's shell)
     let session1 = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session 1");
 
     let session2 = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session 2");
 
     let session3 = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create session 3");
 
     // Verify all sessions exist
@@ -101,7 +101,7 @@ fn test_reap_dead_sessions_comprehensive() {
         .expect("Failed to create short-lived session 2");
 
     let long_lived = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create long-lived session");
 
     // Verify all sessions exist
@@ -159,7 +159,7 @@ fn test_rapid_session_churn() {
             None
         };
         let session_id = manager
-            .create_session(cmd, None)
+            .create_session(cmd, None, "192.168.1.1".to_string(), "test-agent".to_string())
             .expect("Failed to create session");
 
         // Sometimes delete immediately, sometimes wait
@@ -197,7 +197,7 @@ fn test_mixed_reap_and_delete() {
         .expect("Failed to create auto-exit session 1");
 
     let manual_delete = manager
-        .create_session(None, None)
+        .create_session(None, None, "192.168.1.1".to_string(), "test-agent".to_string())
         .expect("Failed to create manual-delete session");
 
     let auto_exit2 = manager
