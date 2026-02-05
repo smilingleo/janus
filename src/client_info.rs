@@ -93,9 +93,50 @@ impl Fingerprint {
         self == other
     }
 
-    /// Check if fingerprint appears valid (has at least User-Agent)
+    /// Check if fingerprint appears valid
+    ///
+    /// Requires at least 3 out of 4 headers to be present to prevent trivial spoofing.
+    /// User-Agent is mandatory as it's the most stable browser identifier.
+    ///
+    /// # Returns
+    /// true if User-Agent is present AND at least 2 other headers are present
     pub fn is_valid(&self) -> bool {
-        !self.user_agent.is_empty()
+        // User-Agent is mandatory
+        if self.user_agent.is_empty() {
+            return false;
+        }
+
+        // Count how many other headers are present
+        let mut present_count = 0;
+        if !self.accept.is_empty() {
+            present_count += 1;
+        }
+        if !self.accept_language.is_empty() {
+            present_count += 1;
+        }
+        if !self.accept_encoding.is_empty() {
+            present_count += 1;
+        }
+
+        // Require at least 2 additional headers beyond User-Agent
+        // This means at least 3 out of 4 headers must be present
+        present_count >= 2
+    }
+
+    /// Calculate a simple entropy score for the fingerprint
+    ///
+    /// Higher scores indicate more unique/specific fingerprints.
+    /// Used for logging and monitoring fingerprint quality.
+    pub fn entropy_score(&self) -> usize {
+        let mut score = 0;
+
+        // Longer, more specific values contribute more entropy
+        score += self.user_agent.len().min(100);
+        score += self.accept.len().min(50);
+        score += self.accept_language.len().min(30);
+        score += self.accept_encoding.len().min(30);
+
+        score
     }
 }
 
@@ -366,6 +407,7 @@ mod tests {
 
     #[test]
     fn test_fingerprint_is_valid() {
+        // Valid: all 4 headers present
         let valid_fp = Fingerprint {
             user_agent: "Mozilla/5.0".to_string(),
             accept: "text/html".to_string(),
@@ -374,6 +416,7 @@ mod tests {
         };
         assert!(valid_fp.is_valid());
 
+        // Invalid: no User-Agent
         let invalid_fp = Fingerprint {
             user_agent: "".to_string(),
             accept: "text/html".to_string(),
@@ -381,6 +424,54 @@ mod tests {
             accept_encoding: "gzip".to_string(),
         };
         assert!(!invalid_fp.is_valid());
+
+        // Valid: User-Agent + 2 other headers (accept, accept_language)
+        let valid_minimal = Fingerprint {
+            user_agent: "Mozilla/5.0".to_string(),
+            accept: "text/html".to_string(),
+            accept_language: "en-US".to_string(),
+            accept_encoding: "".to_string(),
+        };
+        assert!(valid_minimal.is_valid());
+
+        // Invalid: User-Agent + only 1 other header
+        let invalid_insufficient = Fingerprint {
+            user_agent: "Mozilla/5.0".to_string(),
+            accept: "text/html".to_string(),
+            accept_language: "".to_string(),
+            accept_encoding: "".to_string(),
+        };
+        assert!(!invalid_insufficient.is_valid());
+
+        // Invalid: User-Agent only
+        let invalid_ua_only = Fingerprint {
+            user_agent: "Mozilla/5.0".to_string(),
+            accept: "".to_string(),
+            accept_language: "".to_string(),
+            accept_encoding: "".to_string(),
+        };
+        assert!(!invalid_ua_only.is_valid());
+    }
+
+    #[test]
+    fn test_fingerprint_entropy_score() {
+        let high_entropy = Fingerprint {
+            user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)".to_string(),
+            accept: "text/html,application/xhtml+xml,application/xml;q=0.9".to_string(),
+            accept_language: "en-US,en;q=0.9".to_string(),
+            accept_encoding: "gzip, deflate, br".to_string(),
+        };
+
+        let low_entropy = Fingerprint {
+            user_agent: "curl".to_string(),
+            accept: "*/*".to_string(),
+            accept_language: "".to_string(),
+            accept_encoding: "".to_string(),
+        };
+
+        assert!(high_entropy.entropy_score() > low_entropy.entropy_score());
+        assert!(high_entropy.entropy_score() > 100); // Should have significant entropy
+        assert!(low_entropy.entropy_score() < 20); // Low entropy score
     }
 
     #[test]

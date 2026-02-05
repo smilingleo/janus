@@ -296,12 +296,18 @@ async fn login(
     // Extract browser fingerprint
     let fingerprint = janus::client_info::Fingerprint::from_headers(&headers);
     if !fingerprint.is_valid() {
-        tracing::warn!("Login attempt with invalid browser fingerprint");
+        tracing::warn!(
+            user_agent_present = !fingerprint.user_agent.is_empty(),
+            accept_present = !fingerprint.accept.is_empty(),
+            accept_language_present = !fingerprint.accept_language.is_empty(),
+            accept_encoding_present = !fingerprint.accept_encoding.is_empty(),
+            "Login attempt with invalid browser fingerprint"
+        );
         return (
-            StatusCode::BAD_REQUEST,
+            StatusCode::UNAUTHORIZED,
             Json(LoginResponse {
                 success: false,
-                message: "Invalid client fingerprint".to_string(),
+                message: "Authentication failed".to_string(),
                 csrf_token: None,
                 session_duration_secs: None,
             }),
@@ -312,13 +318,14 @@ async fn login(
     if request.token.len() != 64 || !request.token.chars().all(|c| c.is_ascii_hexdigit()) {
         tracing::warn!(
             token_length = request.token.len(),
+            is_hex = request.token.chars().all(|c| c.is_ascii_hexdigit()),
             "Invalid token format"
         );
         return (
             StatusCode::UNAUTHORIZED,
             Json(LoginResponse {
                 success: false,
-                message: "Invalid token format".to_string(),
+                message: "Authentication failed".to_string(),
                 csrf_token: None,
                 session_duration_secs: None,
             }),
@@ -335,10 +342,10 @@ async fn login(
                     "Security: IP address mismatch during login"
                 );
                 return (
-                    StatusCode::FORBIDDEN,
+                    StatusCode::UNAUTHORIZED,
                     Json(LoginResponse {
                         success: false,
-                        message: "IP address validation failed".to_string(),
+                        message: "Authentication failed".to_string(),
                         csrf_token: None,
                         session_duration_secs: None,
                     }),
@@ -351,7 +358,7 @@ async fn login(
                 StatusCode::UNAUTHORIZED,
                 Json(LoginResponse {
                     success: false,
-                    message: "Invalid token".to_string(),
+                    message: "Authentication failed".to_string(),
                     csrf_token: None,
                     session_duration_secs: None,
                 }),
@@ -433,22 +440,19 @@ async fn login(
             )
         }
         Err(e) => {
-            let error_message = match e {
+            // Log detailed error information but return generic message
+            match e {
                 janus::auth::AuthError::InvalidToken => {
                     tracing::warn!("Login failed: Invalid token");
-                    "Invalid token"
                 }
                 janus::auth::AuthError::ExpiredToken => {
                     tracing::warn!("Login failed: Expired token");
-                    "Token has expired"
                 }
                 janus::auth::AuthError::AlreadyUsed => {
                     tracing::warn!("Login failed: Token already used");
-                    "Token has already been used"
                 }
                 _ => {
                     tracing::error!(error = ?e, "Login failed: Internal error");
-                    "Authentication failed"
                 }
             };
 
@@ -456,7 +460,7 @@ async fn login(
                 StatusCode::UNAUTHORIZED,
                 Json(LoginResponse {
                     success: false,
-                    message: error_message.to_string(),
+                    message: "Authentication failed".to_string(),
                     csrf_token: None,
                     session_duration_secs: None,
                 }),
@@ -518,12 +522,15 @@ async fn create_session(
     // Validate PTY dimensions if provided
     if let Some(rows) = request.rows {
         if rows == 0 || rows > 999 {
-            tracing::warn!(rows = rows, "Invalid PTY rows value");
+            tracing::warn!(
+                rows = rows,
+                "Invalid PTY rows value (must be between 1 and 999)"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(CreateSessionResponse {
                     success: false,
-                    message: "Invalid rows: must be between 1 and 999".to_string(),
+                    message: "Invalid terminal dimensions".to_string(),
                     session_id: None,
                 }),
             );
@@ -531,12 +538,15 @@ async fn create_session(
     }
     if let Some(cols) = request.cols {
         if cols == 0 || cols > 999 {
-            tracing::warn!(cols = cols, "Invalid PTY cols value");
+            tracing::warn!(
+                cols = cols,
+                "Invalid PTY cols value (must be between 1 and 999)"
+            );
             return (
                 StatusCode::BAD_REQUEST,
                 Json(CreateSessionResponse {
                     success: false,
-                    message: "Invalid cols: must be between 1 and 999".to_string(),
+                    message: "Invalid terminal dimensions".to_string(),
                     session_id: None,
                 }),
             );
@@ -571,12 +581,15 @@ async fn create_session(
             )
         }
         Err(janus::session::SessionError::LimitReached(max)) => {
-            tracing::warn!(max_sessions = max, "Session limit reached");
+            tracing::warn!(
+                max_sessions = max,
+                "Session limit reached"
+            );
             (
                 StatusCode::TOO_MANY_REQUESTS,
                 Json(CreateSessionResponse {
                     success: false,
-                    message: format!("Session limit reached (max: {})", max),
+                    message: "Session limit reached".to_string(),
                     session_id: None,
                 }),
             )
@@ -624,8 +637,7 @@ async fn delete_session(
                 StatusCode::NOT_FOUND,
                 Json(DeleteSessionResponse {
                     success: false,
-                    message: "Session not found (may have been deleted or server restarted)"
-                        .to_string(),
+                    message: "Session not found".to_string(),
                 }),
             )
         }
@@ -916,11 +928,11 @@ async fn handle_websocket(
                                         session_id = %session_id,
                                         rows = rows,
                                         cols = cols,
-                                        "Invalid resize dimensions"
+                                        "Invalid resize dimensions (must be between 1 and 999)"
                                     );
-                                    let _ = handler.send_error(format!(
-                                        "Invalid dimensions: rows and cols must be between 1 and 999"
-                                    )).await;
+                                    let _ = handler.send_error(
+                                        "Invalid terminal dimensions".to_string()
+                                    ).await;
                                     continue;
                                 }
 
@@ -945,10 +957,11 @@ async fn handle_websocket(
                                     tracing::warn!(
                                         session_id = %session_id,
                                         bytes = data.len(),
+                                        max_bytes = 64 * 1024,
                                         "Input data too large, rejecting"
                                     );
                                     let _ = handler.send_error(
-                                        "Input too large (max 64KB per message)".to_string()
+                                        "Input data too large".to_string()
                                     ).await;
                                     continue;
                                 }

@@ -401,8 +401,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_csrf_ip_mode_mismatch() {
-        use crate::client_info::LOCAL_IP_SENTINEL;
-
         let sessions = Arc::new(RwLock::new(HashMap::new()));
         sessions.write().unwrap().insert(
             "test-session".to_string(),
