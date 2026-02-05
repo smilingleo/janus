@@ -15,7 +15,7 @@ fn test_authentication_flow() {
 
     // 1. Generate token
     let token = token_store
-        .generate_and_store()
+        .generate_and_store("192.168.1.1".to_string())
         .expect("Failed to generate token");
     assert_eq!(token.len(), 64);
 
@@ -214,7 +214,7 @@ fn test_token_expiration() {
 
     // Generate token
     let token = token_store
-        .generate_and_store()
+        .generate_and_store("192.168.1.1".to_string())
         .expect("Failed to generate token");
 
     // Token should be valid initially

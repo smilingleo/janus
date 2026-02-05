@@ -17,7 +17,7 @@ fn test_rapid_token_generation() {
 
     for _ in 0..count {
         token_store
-            .generate_and_store()
+            .generate_and_store("192.168.1.1".to_string())
             .expect("Failed to generate token");
     }
 
@@ -79,7 +79,7 @@ fn test_concurrent_token_operations() {
             for i in 0..ops_per_thread {
                 // Generate token
                 let token = store
-                    .generate_and_store()
+                    .generate_and_store("192.168.1.1".to_string())
                     .expect(&format!("Thread {} op {} failed", thread_id, i));
 
                 // Validate immediately
@@ -246,7 +246,7 @@ fn test_token_cleanup_performance() {
     // Generate many tokens
     for _ in 0..100 {
         token_store
-            .generate_and_store()
+            .generate_and_store("192.168.1.1".to_string())
             .expect("Failed to generate token");
     }
 
@@ -365,7 +365,7 @@ fn test_token_validation_performance() {
     let mut tokens = Vec::new();
     for _ in 0..50 {
         let token = token_store
-            .generate_and_store()
+            .generate_and_store("192.168.1.1".to_string())
             .expect("Failed to generate token");
         tokens.push(token);
     }
