@@ -14,8 +14,28 @@ Exposing a terminal to the internet carries inherent security risks. Ensure you:
 ## Prerequisites
 
 - Ngrok account and installed CLI ([ngrok.com](https://ngrok.com))
-- Janus built and configured
+- Rust toolchain installed (for building from source)
 - Understanding of security implications
+
+## Building the Single Binary
+
+Janus embeds all static frontend assets at compile time, producing a single self-contained executable:
+
+```bash
+# Build release binary with embedded assets
+cargo build --release
+
+# Binary is located at:
+# target/release/janus (macOS/Linux)
+# target/release/janus.exe (Windows)
+```
+
+The release binary (~10MB) includes:
+- Backend server
+- All frontend assets (HTML, CSS, JavaScript)
+- No external files required for deployment
+
+**Note**: Static files from `static/` are embedded during compilation. If you update the frontend, rebuild the binary to include the new assets.
 
 ## Quick Start
 

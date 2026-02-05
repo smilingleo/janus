@@ -13,5 +13,6 @@ pub mod notification;
 pub mod rate_limit;
 pub mod session;
 pub mod session_logger;
+pub mod static_files;
 pub mod tls;
 pub mod websocket;

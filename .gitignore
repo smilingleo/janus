@@ -5,4 +5,4 @@ config.toml
 .DS_Store
 ~/
 .agents/
-.web-terminal
+.janus/

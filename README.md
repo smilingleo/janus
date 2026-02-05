@@ -8,6 +8,7 @@ Gateway guardian to your terminal realm. A secure web-based terminal application
 
 ## Features
 
+- **Single Binary Deployment**: All assets embedded at compile time - no external files needed
 - **Secure Authentication**: Token-based authentication via iMessage (no passwords stored)
 - **Multiple Terminal Sessions**: Create and manage multiple terminal sessions
 - **Real-time Terminal Streaming**: Bidirectional PTY streaming over WebSocket
@@ -34,15 +35,20 @@ Gateway guardian to your terminal realm. A secure web-based terminal application
 ### Building
 
 ```bash
-# Build the backend
-cargo build --release
-
-# Build the frontend
+# Build the frontend first
 cd frontend
 npm install
-npm run build
+npm run build  # Output goes to ../static/
 cd ..
+
+# Build the backend (embeds static files into the binary)
+cargo build --release
 ```
+
+The build process:
+1. Frontend build outputs to `static/` directory
+2. Backend build embeds `static/` contents into the binary
+3. Result: Single self-contained executable (~10MB) with no external dependencies
 
 ### Configuration
 

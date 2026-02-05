@@ -1523,11 +1523,8 @@ async fn main() {
         .layer(tower_cookies::CookieManagerLayer::new())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
-        // Serve static files (frontend)
-        .fallback_service(
-            tower_http::services::ServeDir::new("static")
-                .not_found_service(tower_http::services::ServeFile::new("static/index.html"))
-        );
+        // Serve embedded static files (frontend)
+        .fallback(janus::static_files::serve_static_file);
 
     // Log startup message with structured fields
     tracing::info!(

@@ -53,6 +53,10 @@ nix = { version = "0.29", features = ["user"] }
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }
 
+# Static file embedding
+rust-embed = "8.2"
+mime_guess = "2.0"
+
 [dev-dependencies]
 tokio-test = "0.4"
 axum-test = "14"
